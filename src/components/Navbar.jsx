@@ -24,6 +24,15 @@ export default function Navbar() {
   const { count, setOpen } = useCart();
   const { user, logout } = useAuth();
 
+  const envAdminEmails = (import.meta.env.VITE_ADMIN_EMAILS || import.meta.env.VITE_ADMIN_EMAIL || '')
+    .toLowerCase()
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  const isUserAdmin = user && (envAdminEmails.length === 0 || envAdminEmails.includes((user.email || '').toLowerCase()));
+
+
   const handleLogout = async () => {
     setUserDropdown(false);
     await logout();
@@ -53,9 +62,11 @@ export default function Navbar() {
 
             {/* Mobile Auth and Admin action in drawer */}
             <div className="mobile-auth show-sm">
-              <Link to="/admin" className="btn btn-cream full" onClick={() => setMobile(false)}>
-                <ShieldCheck size={18} /> Admin Desk
-              </Link>
+              {isUserAdmin && (
+                <Link to="/admin" className="btn btn-cream full" onClick={() => setMobile(false)}>
+                  <ShieldCheck size={18} /> Admin Desk
+                </Link>
+              )}
               {user ? (
                 <div className="mobile-user-box" style={{ marginTop: '.6rem' }}>
                   <div className="mobile-user-name">
@@ -116,13 +127,15 @@ export default function Navbar() {
                         >
                           <Package size={16} /> My Orders & Bookings
                         </button>
-                        <Link
-                          to="/admin"
-                          className="dropdown-item"
-                          onClick={() => setUserDropdown(false)}
-                        >
-                          <ShieldCheck size={16} /> Admin Desk
-                        </Link>
+                        {isUserAdmin && (
+                          <Link
+                            to="/admin"
+                            className="dropdown-item"
+                            onClick={() => setUserDropdown(false)}
+                          >
+                            <ShieldCheck size={16} /> Admin Desk
+                          </Link>
+                        )}
                         <button className="dropdown-item logout-item" onClick={handleLogout}>
                           <LogOut size={16} /> Sign Out
                         </button>

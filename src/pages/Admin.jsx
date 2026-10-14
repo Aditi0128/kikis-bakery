@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   getAllOrders,
+  subscribeAllOrders,
   updateOrderStatus,
   getAllReservations,
   updateReservationStatus,
@@ -8,6 +9,9 @@ import {
   updateCustomOrderStatus
 } from '../services/db';
 import { isFirebaseConfigured } from '../firebase';
+import { useAuth } from '../context/AuthContext';
+import AuthModal from '../components/AuthModal';
+import { Link } from 'react-router-dom';
 import {
   ShoppingBag,
   Calendar,
@@ -15,22 +19,56 @@ import {
   RefreshCw,
   Clock,
   CheckCircle,
-  Truck,
-  XCircle,
   Phone,
   MapPin,
-  Filter
+  Filter,
+  ShieldAlert,
+  Lock,
+  KeyRound,
+  LogOut,
+  ArrowLeft
 } from 'lucide-react';
 import cat from '../assets/cat.png';
 import logoImg from '../assets/logo.jpg';
 
 export default function Admin() {
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'reservations' | 'custom'
+  const { user, loading: authLoading, logout } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [passcode, setPasscode] = useState('');
+  const [passcodeUnlocked, setPasscodeUnlocked] = useState(false);
+  const [passcodeError, setPasscodeError] = useState(false);
+
+  // Tab & Data state
+  const [activeTab, setActiveTab] = useState('orders');
   const [orders, setOrders] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cityFilter, setCityFilter] = useState('All');
+
+  // Admin emails configured via .env (comma-separated if multiple)
+  const envAdminEmails = (import.meta.env.VITE_ADMIN_EMAILS || import.meta.env.VITE_ADMIN_EMAIL || '')
+    .toLowerCase()
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  const adminPasscode = import.meta.env.VITE_ADMIN_PASSCODE || 'kiki2026';
+
+  // Check if current user is an authorized admin
+  const isAuthorizedAdmin =
+    passcodeUnlocked ||
+    (user && (envAdminEmails.length === 0 || envAdminEmails.includes((user.email || '').toLowerCase())));
+
+  const handleUnlockPasscode = (e) => {
+    e.preventDefault();
+    if (passcode.trim() === adminPasscode) {
+      setPasscodeUnlocked(true);
+      setPasscodeError(false);
+    } else {
+      setPasscodeError(true);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -51,8 +89,15 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (isAuthorizedAdmin) {
+      loadData();
+      // Listen for new orders in real-time
+      const unsubscribe = subscribeAllOrders((realtimeOrders) => {
+        setOrders(realtimeOrders || []);
+      });
+      return () => unsubscribe && unsubscribe();
+    }
+  }, [isAuthorizedAdmin]);
 
   const handleOrderStatus = async (id, newStatus) => {
     await updateOrderStatus(id, newStatus);
@@ -69,7 +114,99 @@ export default function Admin() {
     setCustomOrders((prev) => prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c)));
   };
 
-  // Metrics
+  // 1. Loading state while Firebase checks auth
+  if (authLoading) {
+    return (
+      <section className="page admin-page text-center">
+        <div className="card admin-empty" style={{ maxWidth: '420px', margin: '4rem auto' }}>
+          <p>Checking bakery manager credentials...</p>
+        </div>
+      </section>
+    );
+  }
+
+  // 2. Not Logged In - Staff Lock Screen
+  if (!user && !passcodeUnlocked) {
+    return (
+      <section className="page narrow admin-page">
+        <div className="card admin-lock-card">
+          <div className="admin-lock-icon-wrap">
+            <Lock size={36} className="lock-icon" />
+          </div>
+          <h2>Bakery Staff & Kitchen Desk</h2>
+          <p className="muted">
+            This dashboard displays live customer phone numbers, delivery addresses, and revenue. Access is restricted to authorized bakery managers.
+          </p>
+
+          <div className="admin-lock-actions">
+            <button className="btn btn-red full" onClick={() => setAuthModalOpen(true)}>
+              Sign in with Admin Account
+            </button>
+          </div>
+
+          <div className="auth-divider">
+            <span>or unlock with manager passcode</span>
+          </div>
+
+          <form onSubmit={handleUnlockPasscode} className="admin-passcode-form">
+            <div className="input-with-icon">
+              <KeyRound size={18} className="field-icon" />
+              <input
+                type="password"
+                placeholder="Manager passcode (e.g. kiki2026)"
+                value={passcode}
+                onChange={(e) => { setPasscode(e.target.value); setPasscodeError(false); }}
+                required
+              />
+            </div>
+            {passcodeError && (
+              <span className="passcode-error-msg">Incorrect passcode. Please try again.</span>
+            )}
+            <button type="submit" className="btn btn-cream full">
+              Unlock Desk
+            </button>
+          </form>
+
+          <div className="admin-lock-foot">
+            <Link to="/" className="link-muted"><ArrowLeft size={16} /> Return to Bakery Home</Link>
+          </div>
+        </div>
+
+        <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+      </section>
+    );
+  }
+
+  // 3. Logged in, but NOT an authorized admin email
+  if (user && !isAuthorizedAdmin) {
+    return (
+      <section className="page narrow admin-page">
+        <div className="card admin-lock-card">
+          <div className="admin-lock-icon-wrap access-denied">
+            <ShieldAlert size={36} className="lock-icon" />
+          </div>
+          <h2>Access Restricted</h2>
+          <p>
+            You are signed in as <strong>{user.email}</strong>.
+          </p>
+          <div className="access-denied-box">
+            This account is not authorized to view the bakery admin ledger. Only designated manager accounts can access customer order records.
+          </div>
+
+          <div className="admin-lock-actions">
+            <button className="btn btn-cream full" onClick={logout}>
+              <LogOut size={16} /> Sign Out & Switch Account
+            </button>
+            <Link to="/menu" className="btn btn-red full">
+              Return to Bakery Menu
+            </Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // 4. Authorized Admin View
   const totalRevenue = orders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
   const activeOrdersCount = orders.filter((o) => o.status !== 'Delivered' && o.status !== 'Cancelled').length;
 
@@ -81,11 +218,17 @@ export default function Admin() {
     <section className="page admin-page">
       <div className="admin-header-row">
         <div>
-          <div className="admin-title-wrap"><img src={logoImg} alt="Kiki Bakery" className="admin-logo-seal" /><h1>Bakery Admin Desk</h1></div>
+          <div className="admin-title-wrap">
+            <img src={logoImg} alt="Kiki Bakery" className="admin-logo-seal" />
+            <h1>Bakery Admin Desk</h1>
+          </div>
           <p className="admin-sub">
             Order management, table bookings, and custom cake quotes &bull;{' '}
             <span className={`db-mode-tag ${isFirebaseConfigured ? 'online' : 'demo'}`}>
               {isFirebaseConfigured ? 'Cloud Firestore Connected' : 'Local Demo Mode'}
+            </span>
+            <span className="admin-active-user-badge">
+              Manager: {user?.email || 'Passcode Unlocked'}
             </span>
           </p>
         </div>

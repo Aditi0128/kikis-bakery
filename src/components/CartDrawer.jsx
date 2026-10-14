@@ -65,6 +65,19 @@ export default function CartDrawer() {
       };
 
       const placed = await createOrder(orderPayload, user);
+      if (typeof window !== 'undefined' && window.gtag) {
+        window.gtag('event', 'purchase', {
+          transaction_id: placed.id,
+          value: placed.total,
+          currency: 'INR',
+          items: (placed.items || []).map((i) => ({
+            item_id: i.id,
+            item_name: i.name,
+            price: i.price,
+            quantity: i.qty,
+          })),
+        });
+      }
       setOrderComplete(placed);
       clear();
     } catch (err) {
